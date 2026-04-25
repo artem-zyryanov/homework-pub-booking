@@ -85,8 +85,29 @@ def extract_condition_facts(text: str) -> list[str]:
 def extract_venue_facts(text: str) -> list[str]:
     """Extract venue names from freeform text (e.g. 'Venue: Castle Royal Grand Inn')."""
     stripped = re.sub(r"<[^>]+>", " ", text)
+    stripped = re.sub(r"\*{1,2}", "", stripped)  # strip markdown bold/italic
     matches = re.findall(r"(?:Venue|Location|Pub)\s*:\s*(.+)", stripped, re.IGNORECASE)
     return [m.strip() for m in matches if m.strip()]
+
+
+def extract_field_values(text: str) -> list[str]:
+    """Extract full values from key-value field lines (Total:, Deposit:, Cost:, etc.).
+
+    Catches fabrications injected on financial field lines where the value
+    isn't a money/temperature pattern (e.g., a venue name on the Total: line).
+    """
+    stripped = re.sub(r"<[^>]+>", " ", text)
+    stripped = re.sub(r"\*{1,2}", "", stripped)  # strip markdown bold
+    results = []
+    for m in re.finditer(
+        r"(?i)(?:total|deposit|cost|price|fee|hire)\s*(?:cost|required)?\s*[:\-]\s*(.+?)$",
+        stripped,
+        re.MULTILINE,
+    ):
+        val = m.group(1).strip().rstrip(".")
+        if val:
+            results.append(val)
+    return results
 
 
 def extract_testid_facts(text: str) -> dict[str, str]:
@@ -131,6 +152,7 @@ def verify_dataflow(flyer_content: str) -> IntegrityResult:
     facts_to_check.extend(extract_temperature_facts(flyer_content))
     facts_to_check.extend(extract_condition_facts(flyer_content))
     facts_to_check.extend(extract_venue_facts(flyer_content))
+    facts_to_check.extend(extract_field_values(flyer_content))
 
     # De-dupe while preserving order
     seen: set[str] = set()
@@ -178,6 +200,7 @@ __all__ = [
     "_TOOL_CALL_LOG",
     "clear_log",
     "extract_condition_facts",
+    "extract_field_values",
     "extract_money_facts",
     "extract_venue_facts",
     "extract_temperature_facts",
