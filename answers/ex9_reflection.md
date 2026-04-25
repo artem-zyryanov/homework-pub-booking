@@ -78,35 +78,35 @@ a pass.
 ### Your answer
 
 If forced to remove all but one sovereign-agent primitive, I would keep
-session directories (Decision 1 from the course material). Every other
-primitive can be rebuilt on top of the filesystem-as-truth-store that
-session directories provide.
+session directories. The critical production failure mode they prevent
+is concurrent booking sessions corrupting each other's state.
 
-The forward-only state machine (Decision 2) is a set of legal transitions
-enforced by checking the current state file. With session directories, I
-can reimplement this as a state.json file and a validate_transition()
-function — under twenty lines of code. Tickets (Decision 3) are already
-stored as JSON files inside the session directory; without the ticket
-abstraction I would write raw .jsonl entries. Atomic-rename IPC
-(Decision 5) depends on the OS filesystem guarantees that session
-directories inherit; without the IPC abstraction I would use the same
-rename() syscall directly.
+In my Ex7 run (sess_9ba10d49e4d2), the handoff bridge wrote a forward
+handoff file to session.ipc_input_dir and later archived it to
+logs/handoffs/round_1_forward.json. Both paths are scoped to a single
+session directory. If two concurrent bookings shared a flat filesystem,
+the second bridge round would overwrite the first session's
+handoff_to_structured.json, causing the first booking to read the wrong
+venue data and potentially confirm a reservation the customer never
+requested. Session directories prevent this by giving each booking its
+own filesystem namespace — sess_9ba10d49e4d2/ipc/ can never collide
+with another session's ipc/.
 
-Losing session directories breaks everything else. Without per-session
-isolation: tool call logs from different runs would collide, the integrity
-check could not compare a flyer against its own session's tool outputs,
-and trace.jsonl would need a session_id column with all the filtering
-complexity that entails. The handoff bridge writes forward handoff files
-to session.ipc_input_dir — without session directories, that path does
-not exist and the entire loop/structured coordination mechanism collapses.
-Debugging becomes grep across a shared log instead of
-"ls sessions/sess_*/workspace/" to see exactly what each run produced.
+The same isolation protects the integrity check. verify_dataflow
+compares flyer facts against _TOOL_CALL_LOG entries from the current
+session. Without per-session directories, tool call records from
+concurrent runs would intermingle, and the integrity check could
+falsely verify a fabricated fact that happened to match a different
+session's tool output. In production with dozens of simultaneous
+bookings, this would silently pass hallucinated venue names or costs.
 
-Session directories are to sovereign-agent what commits are to git: the
-atomic unit of truth that every higher-level feature depends on.
+The remaining primitives can each be reimplemented in roughly twenty
+lines of code on top of session directories — they are conveniences,
+not foundations. Session directories are the atomic unit of truth that
+makes every higher-level feature possible.
 
 ### Citation
 
-- sessions/sess_8ce1fe808d80/ — directory structure (workspace/, logs/, ipc/)
-- sessions/sess_9ba10d49e4d2/ — bridge writing handoff files to session.ipc_input_dir
-- starter/handoff_bridge/bridge.py:103-111 — write_handoff depending on session paths
+- sessions/sess_9ba10d49e4d2/ — bridge handoff files in ipc/ and logs/handoffs/
+- starter/handoff_bridge/bridge.py:103-111 — write_handoff scoped to session paths
+- starter/edinburgh_research/integrity.py:118-164 — verify_dataflow reading session-scoped log

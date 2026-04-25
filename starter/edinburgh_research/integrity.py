@@ -82,6 +82,13 @@ def extract_condition_facts(text: str) -> list[str]:
     return [c for c in known if c in tl]
 
 
+def extract_venue_facts(text: str) -> list[str]:
+    """Extract venue names from freeform text (e.g. 'Venue: Castle Royal Grand Inn')."""
+    stripped = re.sub(r"<[^>]+>", " ", text)
+    matches = re.findall(r"(?:Venue|Location|Pub)\s*:\s*(.+)", stripped, re.IGNORECASE)
+    return [m.strip() for m in matches if m.strip()]
+
+
 def extract_testid_facts(text: str) -> dict[str, str]:
     """For HTML flyers that use data-testid, extract {testid: value} pairs.
 
@@ -123,6 +130,7 @@ def verify_dataflow(flyer_content: str) -> IntegrityResult:
     facts_to_check.extend(extract_money_facts(flyer_content))
     facts_to_check.extend(extract_temperature_facts(flyer_content))
     facts_to_check.extend(extract_condition_facts(flyer_content))
+    facts_to_check.extend(extract_venue_facts(flyer_content))
 
     # De-dupe while preserving order
     seen: set[str] = set()
@@ -171,6 +179,7 @@ __all__ = [
     "clear_log",
     "extract_condition_facts",
     "extract_money_facts",
+    "extract_venue_facts",
     "extract_temperature_facts",
     "extract_testid_facts",
     "fact_appears_in_log",
