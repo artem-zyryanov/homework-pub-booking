@@ -4,28 +4,35 @@
 
 ### Your answer
 
-In my Ex7 run (session sess_a382a2149fc1), the planner's second
-subgoal was sg_2 "commit the booking under policy rules" with
-assigned_half: "structured". The signal that drove this was the task
-text naming a deterministic constraint — "under policy rules".
-Sovereign-agent's DefaultPlanner is prompted with the list of
-available halves and their purposes; when subgoal description
-mentions rules/policy/limits, the planner prefers structured.
+In my Ex7 run (session sess_9ba10d49e4d2), the DefaultPlanner split the
+task into two subgoals: one for open-ended research (assigned to loop)
+and one for committing the booking under policy constraints (assigned to
+structured). The signal that drove the structured assignment was the
+subgoal description referencing deterministic rules — party size limits,
+deposit thresholds, confirmation protocol. The planner is prompted with
+descriptions of both halves: loop is for "open-ended tool use where the
+LLM decides what to do next," structured is for "rule-governed dialog
+with known constraints." When a subgoal's success criterion involves
+enforcing a policy rather than discovering information, the planner
+routes it to structured.
 
-This decision is advisory, not physical. The orchestrator respects
-it only because both halves are wired up. If only a loop half
-existed (as in research_assistant), a subgoal assigned to structured
-would go to the void. That's failure mode #4 from the course slides.
+This matters because the structured half enforces rules in Python code
+(the mock Rasa server checks party <= 8, deposit <= 300), not in prose.
+If the booking subgoal were assigned to the loop half, the LLM would
+need to "know" the rules and could hallucinate acceptance of an invalid
+booking. The structured half makes the decision mechanically: party_size
+> 8 produces action="rejected" regardless of what the LLM thinks.
 
-The broader lesson: the planner makes an architectural decision
-based on prose interpretation. Put the rules somewhere the LLM
-cannot mis-assign — in the structured half's Python — and prose
-ambiguity no longer matters.
+The broader design lesson is that the planner's routing decision is
+advisory — it maps prose descriptions to half types. The real safety
+comes from the structured half's code enforcing constraints that the
+LLM cannot override. Put the invariants in code, not in prompts.
 
 ### Citation
 
-- sessions/sess_a382a2149fc1/logs/tickets/tk_*/raw_output.json
-- sessions/sess_a382a2149fc1/logs/trace.jsonl:23
+- sessions/sess_9ba10d49e4d2/logs/trace.jsonl — bridge.round_start and state_changed events
+- starter/handoff_bridge/bridge.py:56-171 — HandoffBridge.run() dispatching on next_action
+- starter/rasa_half/structured_half.py:432-484 — mock server enforcing party/deposit rules
 
 ---
 
@@ -33,26 +40,36 @@ ambiguity no longer matters.
 
 ### Your answer
 
-During Ex5 development my integrity check caught a subtle fabrication
-that manual review missed. In session sess_de44a1b8eb12 the flyer
-claimed "Total: £560" and "Deposit: £112" — plausible numbers that
-followed the deposit formula in catering.json. I skimmed and moved on.
+The integrity check exposed a real fabrication problem in my Ex5 real-LLM
+runs. In session sess_8ce1fe808d80, the Qwen3-32B executor produced a
+flyer naming "The Edinburgh Grand" as the venue — a name that appears
+nowhere in venues.json — with empty cost and weather fields. The
+venue_search tool had been called twice with non-matching parameters
+(near="Edinburgh City Centre" party=10, near="Old Town" party=15),
+returning 0 and 1 results respectively. The executor ignored the actual
+results and fabricated a venue name wholesale.
 
-verify_dataflow returned ok=False with unverified_facts=['£560','£112'].
-The trace showed calculate_cost returned total_gbp=540, deposit=0. The
-real total was £540 under the £300 deposit threshold. The LLM had
-written "£560" plausibly — close enough that a human reviewer wouldn't
-notice without cross-referencing.
+verify_dataflow returned ok=True but only vacuously ("no extractable
+facts in flyer") because the LLM left every money and temperature field
+blank. This is arguably worse than an explicit failure: the flyer has
+correct HTML structure, proper data-testid tags, and a plausible-sounding
+venue name. A human reviewer scanning the output would see what looks
+like a complete document and might not notice that every fact field is
+empty or fabricated.
 
-The check caught it because it compared against ground truth in
-_TOOL_CALL_LOG, not against "does this look reasonable." The lesson
-generalises: if the validator would pass a human skim, plant a
-deliberately-weird value like £9999 and confirm it's caught.
+Compare this to the offline run (sess_23134e2dac2b) where verify_dataflow
+confirmed 4 concrete facts against _TOOL_CALL_LOG. The contrast
+demonstrates what the integrity check is designed to catch: the LLM
+produces confident-looking output regardless of whether it grounded its
+facts in actual tool returns. A stricter implementation could treat
+vacuous verification (zero facts extracted) as a warning rather than
+a pass.
 
 ### Citation
 
-- sessions/sess_de44a1b8eb12/workspace/flyer.md:12
-- sessions/sess_de44a1b8eb12/logs/trace.jsonl:15
+- sessions/sess_8ce1fe808d80/workspace/flyer.html — hallucinated venue, empty fact fields
+- sessions/sess_23134e2dac2b — offline run with 4 verified facts
+- starter/edinburgh_research/integrity.py:118-164 — verify_dataflow extraction and matching
 
 ---
 
@@ -60,20 +77,36 @@ deliberately-weird value like £9999 and confirm it's caught.
 
 ### Your answer
 
-I'd keep session directories (Decision 1) as the last thing standing
-and rebuild everything else if forced. The forward-only state machine
-(Decision 2) is important but fragile without directories. Tickets
-(Decision 3) I could rebuild as .jsonl files inside the session.
-Atomic-rename IPC (Decision 5) is replaceable by directory polling.
+If forced to remove all but one sovereign-agent primitive, I would keep
+session directories. The critical production failure mode they prevent
+is concurrent booking sessions corrupting each other's state.
 
-Session directories are the irreplaceable piece. Losing them:
-cross-tenant data leaks, reconstructing per-run state from logs,
-"how did this session end up this way" becomes SQL archaeology
-instead of cat. The slides compare it to git commits being the
-foundation — you can rebuild merge, diff, blame from commits but
-not commits from the rest. Session directories are commits.
+In my Ex7 run (sess_9ba10d49e4d2), the handoff bridge wrote a forward
+handoff file to session.ipc_input_dir and later archived it to
+logs/handoffs/round_1_forward.json. Both paths are scoped to a single
+session directory. If two concurrent bookings shared a flat filesystem,
+the second bridge round would overwrite the first session's
+handoff_to_structured.json, causing the first booking to read the wrong
+venue data and potentially confirm a reservation the customer never
+requested. Session directories prevent this by giving each booking its
+own filesystem namespace — sess_9ba10d49e4d2/ipc/ can never collide
+with another session's ipc/.
+
+The same isolation protects the integrity check. verify_dataflow
+compares flyer facts against _TOOL_CALL_LOG entries from the current
+session. Without per-session directories, tool call records from
+concurrent runs would intermingle, and the integrity check could
+falsely verify a fabricated fact that happened to match a different
+session's tool output. In production with dozens of simultaneous
+bookings, this would silently pass hallucinated venue names or costs.
+
+The remaining primitives can each be reimplemented in roughly twenty
+lines of code on top of session directories — they are conveniences,
+not foundations. Session directories are the atomic unit of truth that
+makes every higher-level feature possible.
 
 ### Citation
 
-- sessions/sess_de44a1b8eb12/ — the directory itself
-- sessions/sess_a382a2149fc1/logs/trace.jsonl
+- sessions/sess_9ba10d49e4d2/ — bridge handoff files in ipc/ and logs/handoffs/
+- starter/handoff_bridge/bridge.py:103-111 — write_handoff scoped to session paths
+- starter/edinburgh_research/integrity.py:118-164 — verify_dataflow reading session-scoped log
