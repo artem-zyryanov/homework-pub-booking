@@ -26,9 +26,6 @@ from starter.edinburgh_research.integrity import record_tool_call
 _SAMPLE_DATA = Path(__file__).parent / "sample_data"
 
 
-# ---------------------------------------------------------------------------
-# TODO 1 — venue_search
-# ---------------------------------------------------------------------------
 def venue_search(near: str, party_size: int, budget_max_gbp: int = 1000) -> ToolResult:
     """Search for Edinburgh venues near <near> that can seat the party.
 
@@ -79,9 +76,6 @@ def venue_search(near: str, party_size: int, budget_max_gbp: int = 1000) -> Tool
     )
 
 
-# ---------------------------------------------------------------------------
-# TODO 2 — get_weather
-# ---------------------------------------------------------------------------
 def get_weather(city: str, date: str) -> ToolResult:
     """Look up the scripted weather for <city> on <date> (YYYY-MM-DD).
 
@@ -126,9 +120,6 @@ def get_weather(city: str, date: str) -> ToolResult:
     )
 
 
-# ---------------------------------------------------------------------------
-# TODO 3 — calculate_cost
-# ---------------------------------------------------------------------------
 def calculate_cost(
     venue_id: str,
     party_size: int,
@@ -235,9 +226,6 @@ def calculate_cost(
     )
 
 
-# ---------------------------------------------------------------------------
-# TODO 4 — generate_flyer
-# ---------------------------------------------------------------------------
 def generate_flyer(session: Session, event_details: dict) -> ToolResult:
     """Produce an HTML flyer and write it to workspace/flyer.html.
 
